@@ -116,7 +116,9 @@ const TIRE_OPTS = [
 ];
 
 // Sample dyno presets: S52 build ladder (baseline → M50 manifold → Stage 2 → Stage 3),
-// then S54 and S65. All are reference pulls traced from published charts or logs, NOT car #949.
+// then S54, S65, and Kelso's B48 (synced to PWR-Public's TSQJ build only —
+// not the Standard build). All are reference pulls traced from published
+// charts or logs, NOT car #949.
 // S52 variants are Mustang-dyno pulls, so each carries mustang:"yes" for the x1.10 correction.
 // Seven points at 500 RPM steps descending from the PWR top sample point.
 const DYNO_PRESETS = {
@@ -214,6 +216,21 @@ const DYNO_PRESETS = {
       { hp: "263.04", tq: "276.30" }, // 5000
     ],
     curve: [{ rpm: 3300, hp: "167.14", tq: "266.00" }, { rpm: 3500, hp: "180.60", tq: "271.00" }, { rpm: 3750, hp: "196.71", tq: "275.50" }, { rpm: 3850, hp: "202.69", tq: "276.50" }, { rpm: 4000, hp: "209.44", tq: "275.00" }, { rpm: 4250, hp: "221.73", tq: "274.00" }, { rpm: 4500, hp: "235.62", tq: "275.00" }, { rpm: 4750, hp: "250.52", tq: "277.00" }, { rpm: 4850, hp: "256.05", tq: "277.27" }, { rpm: 5000, hp: "263.04", tq: "276.30" }, { rpm: 5060, hp: "265.71", tq: "276.01" }, { rpm: 5250, hp: "274.40", tq: "274.50" }, { rpm: 5500, hp: "284.84", tq: "272.00" }, { rpm: 5750, hp: "294.51", tq: "269.00" }, { rpm: 6000, hp: "303.31", tq: "265.50" }, { rpm: 6250, hp: "311.79", tq: "262.00" }, { rpm: 6500, hp: "320.09", tq: "258.63" }, { rpm: 6750, hp: "333.13", tq: "259.20" }, { rpm: 7000, hp: "346.53", tq: "260.00" }, { rpm: 7250, hp: "353.39", tq: "256.00" }, { rpm: 7500, hp: "357.01", tq: "250.00" }, { rpm: 7750, hp: "361.53", tq: "245.00" }, { rpm: 8000, hp: "365.58", tq: "240.00" }, { rpm: 8250, hp: "367.73", tq: "234.10" }, { rpm: 8300, hp: "367.59", tq: "232.60" }, { rpm: 8400, hp: "365.62", tq: "228.60" }, { rpm: 8450, hp: "315.35", tq: "196.00" }, { rpm: 8500, hp: "242.76", tq: "150.00" }, { rpm: 8550, hp: "159.54", tq: "98.00" }],
+  },
+  kelsoB48: {
+    label: "Kelso's B48 Friend",
+    note: "Full-curve Dynojet pull (2700–7600 RPM, 100 RPM steps) · peak 315.3 whp @ 6300 · rev limit 7600 → top sample 7500 · avg WHP 287.5 / avg TQ 256.3 → PM 271.9",
+    redline: "7600",
+    rows: [
+      { hp: "271.9", tq: "189.9" }, // 7500
+      { hp: "309.9", tq: "231.3" }, // 7000
+      { hp: "314.5", tq: "254.1" }, // 6500
+      { hp: "313.2", tq: "274.3" }, // 6000
+      { hp: "296.9", tq: "283.0" }, // 5500
+      { hp: "269.4", tq: "285.1" }, // 5000
+      { hp: "236.7", tq: "276.4" }, // 4500
+    ],
+    curve: [{ rpm: 2700, hp: "159.3", tq: "310.8" }, { rpm: 2800, hp: "166.3", tq: "312.4" }, { rpm: 2900, hp: "170.5", tq: "309.5" }, { rpm: 3000, hp: "175.4", tq: "307.9" }, { rpm: 3100, hp: "179.4", tq: "304.1" }, { rpm: 3200, hp: "182.9", tq: "300.4" }, { rpm: 3300, hp: "188.3", tq: "300.0" }, { rpm: 3400, hp: "193.7", tq: "298.8" }, { rpm: 3500, hp: "197.8", tq: "296.7" }, { rpm: 3600, hp: "202.3", tq: "295.4" }, { rpm: 3700, hp: "207.5", tq: "295.0" }, { rpm: 3800, hp: "212.7", tq: "294.6" }, { rpm: 3900, hp: "216.8", tq: "291.7" }, { rpm: 4000, hp: "221.4", tq: "290.9" }, { rpm: 4100, hp: "223.9", tq: "286.3" }, { rpm: 4200, hp: "227.8", tq: "285.1" }, { rpm: 4300, hp: "231.7", tq: "281.6" }, { rpm: 4400, hp: "234.2", tq: "278.9" }, { rpm: 4500, hp: "236.7", tq: "276.4" }, { rpm: 4600, hp: "241.4", tq: "274.3" }, { rpm: 4700, hp: "248.1", tq: "277.2" }, { rpm: 4800, hp: "254.9", tq: "279.3" }, { rpm: 4900, hp: "262.8", tq: "281.8" }, { rpm: 5000, hp: "269.4", tq: "285.1" }, { rpm: 5100, hp: "276.8", tq: "286.8" }, { rpm: 5200, hp: "283.0", tq: "285.9" }, { rpm: 5300, hp: "287.5", tq: "284.9" }, { rpm: 5400, hp: "292.0", tq: "283.9" }, { rpm: 5500, hp: "296.9", tq: "283.0" }, { rpm: 5600, hp: "300.0", tq: "281.4" }, { rpm: 5700, hp: "302.9", tq: "278.9" }, { rpm: 5800, hp: "306.6", tq: "276.4" }, { rpm: 5900, hp: "309.3", tq: "275.2" }, { rpm: 6000, hp: "313.2", tq: "274.3" }, { rpm: 6100, hp: "314.1", tq: "270.2" }, { rpm: 6200, hp: "314.1", tq: "265.9" }, { rpm: 6300, hp: "315.3", tq: "262.5" }, { rpm: 6400, hp: "314.5", tq: "257.8" }, { rpm: 6500, hp: "314.5", tq: "254.1" }, { rpm: 6600, hp: "314.5", tq: "249.5" }, { rpm: 6700, hp: "314.3", tq: "245.6" }, { rpm: 6800, hp: "314.1", tq: "241.9" }, { rpm: 6900, hp: "311.2", tq: "236.7" }, { rpm: 7000, hp: "309.9", tq: "231.3" }, { rpm: 7100, hp: "305.0", tq: "224.7" }, { rpm: 7200, hp: "295.9", tq: "218.1" }, { rpm: 7300, hp: "289.7", tq: "207.5" }, { rpm: 7400, hp: "281.0", tq: "200.3" }, { rpm: 7500, hp: "271.9", tq: "189.9" }, { rpm: 7600, hp: "259.0", tq: "179.0" }],
   },
 };
 
