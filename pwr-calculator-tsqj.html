@@ -12,12 +12,21 @@ const { useState, useMemo } = React;
 
 // ── BMW CCA Club Racing — PWR Class Calculator ────────────────────────────────
 // Mirrors the official 2026 PWR Disclosure Jotform logic:
-//   PM = (mean of 7 sampled WHP + mean of 7 sampled Torque) / 2
+//   V5.1: PM = (mean of 7 sampled WHP + mean of 7 sampled Torque) / 2
+//   V5.2: manual-trans cars unchanged (7 points, 3000 RPM span); Sequential/
+//     Automatic-trans cars (-0.5 trans modifier) instead use whichever
+//     contiguous 4-of-7 points (1500 RPM span) yields the highest combined
+//     WHP+Torque average. Rules committee computes this manually through
+//     2026 — this tool's version is a planning estimate.
 //   7 points, 500 RPM apart, top = nearest 500 below the electronic rev limit
 //   Mustang dyno → PM × 1.10 ; Declared PM must be ≥ Calculated PM
 //   Ratio = (Weight / PM) + (Aero + Tires + Trans) → PWR band
 // Build solver inverts the math: weight window per class (at a PM) and
 //   PM window per class (at a weight), so you can plan build direction.
+// A ruleset toggle (V5.1 / V5.2) plus a side-by-side compare panel let a
+//   racer see exactly how the 2026 rule change moves their number.
+// The dyno chart in §1 renders the 7 WHP/Torque points as draggable markers —
+//   drag vertically to re-shape the curve and watch PM/class update live.
 // ──────────────────────────────────────────────────────────────────────────────
 
 const mono = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" };
@@ -73,6 +82,26 @@ const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : NaN; };
 const r1 = (x) => Math.round(x * 10) / 10;
 const r2 = (x) => Math.round(x * 100) / 100;
 const lbs = (x) => (isFinite(x) ? Math.round(x).toLocaleString() : "—");
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// V5.2: Sequential/Automatic-trans PM uses whichever contiguous 4-of-7 dyno
+// points (1500 RPM span) gives the highest combined WHP+Torque average.
+// `rows` is top-down (index 0 = highest RPM); returns null if any of the 7
+// rows is incomplete (can't yet determine a window).
+function best4Window(rows) {
+  let best = null;
+  for (let s = 0; s <= 3; s++) {
+    const slice = rows.slice(s, s + 4);
+    const hps = slice.map((r) => num(r.hp));
+    const tqs = slice.map((r) => num(r.tq));
+    if (hps.some((v) => !isFinite(v)) || tqs.some((v) => !isFinite(v))) continue;
+    const avgHP = hps.reduce((a, b) => a + b, 0) / 4;
+    const avgTQ = tqs.reduce((a, b) => a + b, 0) / 4;
+    const score = avgHP + avgTQ;
+    if (!best || score > best.score) best = { startIdx: s, avgHP, avgTQ, score };
+  }
+  return best;
+}
 
 function modStr(v) {
   if (v === 0) return "0";
@@ -83,11 +112,11 @@ function modStr(v) {
 const TIRE_OPTS = [
   { key: "slick", label: "Non-DOT slick", val: -0.5 },
   { key: "dotr",  label: "DOT-R (R8 / A8 / R7 …)", val: 0.0 },
-  { key: "street",label: ">180 TW · Toyo Proxes RR/R · RA1", val: 1.0 },
+  { key: "street",label: ">180 TW (incl. Hoosier TAP 200TW) · Toyo Proxes RR/R · RA1", val: 1.0 },
 ];
 
 // Sample dyno presets: S52 build ladder (baseline → M50 manifold → Stage 2 → Stage 3),
-// then S54 and S65. All are reference pulls traced from published charts, NOT car #949.
+// then S54 and S65. All are reference pulls traced from published charts or logs, NOT car #949.
 // S52 variants are Mustang-dyno pulls, so each carries mustang:"yes" for the x1.10 correction.
 // Seven points at 500 RPM steps descending from the PWR top sample point.
 const DYNO_PRESETS = {
@@ -105,6 +134,9 @@ const DYNO_PRESETS = {
       { hp: "167.94", tq: "196.00" }, // 4500
       { hp: "153.08", tq: "201.00" }, // 4000
     ],
+    // full reconstructed curve (2000-7000 RPM) behind this preset's 7 official
+    // points — rendered as context in the dyno chart outside the PWR window
+    curve: [{ rpm: 2000, hp: "59.79", tq: "157.00" }, { rpm: 2250, hp: "76.26", tq: "178.00" }, { rpm: 2500, hp: "82.35", tq: "173.00" }, { rpm: 2750, hp: "93.20", tq: "178.00" }, { rpm: 3000, hp: "101.10", tq: "177.00" }, { rpm: 3250, hp: "112.00", tq: "181.00" }, { rpm: 3500, hp: "123.29", tq: "185.00" }, { rpm: 3750, hp: "137.80", tq: "193.00" }, { rpm: 4000, hp: "153.08", tq: "201.00" }, { rpm: 4250, hp: "156.99", tq: "194.00" }, { rpm: 4500, hp: "167.94", tq: "196.00" }, { rpm: 4750, hp: "175.46", tq: "194.00" }, { rpm: 5000, hp: "178.98", tq: "188.00" }, { rpm: 5100, hp: "179.65", tq: "185.00" }, { rpm: 5250, hp: "190.00", tq: "190.00" }, { rpm: 5500, hp: "191.64", tq: "183.00" }, { rpm: 5750, hp: "194.88", tq: "178.00" }, { rpm: 6000, hp: "201.07", tq: "176.00" }, { rpm: 6250, hp: "202.30", tq: "170.00" }, { rpm: 6450, hp: "200.18", tq: "163.00" }, { rpm: 6500, hp: "200.50", tq: "162.00" }, { rpm: 7000, hp: "193.26", tq: "145.00" }],
   },
   s52m50: {
     label: "S52 M50",
@@ -120,6 +152,7 @@ const DYNO_PRESETS = {
       { hp: "165.37", tq: "193.00" }, // 4500
       { hp: "141.66", tq: "186.00" }, // 4000
     ],
+    curve: [{ rpm: 2000, hp: "60.17", tq: "158.00" }, { rpm: 2250, hp: "76.26", tq: "178.00" }, { rpm: 2500, hp: "82.35", tq: "173.00" }, { rpm: 2750, hp: "91.63", tq: "175.00" }, { rpm: 3000, hp: "100.53", tq: "176.00" }, { rpm: 3250, hp: "110.15", tq: "178.00" }, { rpm: 3500, hp: "115.29", tq: "173.00" }, { rpm: 3750, hp: "127.09", tq: "178.00" }, { rpm: 4000, hp: "141.66", tq: "186.00" }, { rpm: 4250, hp: "153.75", tq: "190.00" }, { rpm: 4500, hp: "165.37", tq: "193.00" }, { rpm: 4750, hp: "175.46", tq: "194.00" }, { rpm: 5000, hp: "180.88", tq: "190.00" }, { rpm: 5250, hp: "191.00", tq: "191.00" }, { rpm: 5500, hp: "195.83", tq: "187.00" }, { rpm: 5750, hp: "201.45", tq: "184.00" }, { rpm: 6000, hp: "205.64", tq: "180.00" }, { rpm: 6250, hp: "208.25", tq: "175.00" }, { rpm: 6450, hp: "210.01", tq: "171.00" }, { rpm: 6500, hp: "210.40", tq: "170.00" }, { rpm: 7000, hp: "206.59", tq: "155.00" }],
   },
   s52s2: {
     label: "S52 S2",
@@ -135,6 +168,7 @@ const DYNO_PRESETS = {
       { hp: "179.07", tq: "209.00" }, // 4500
       { hp: "153.85", tq: "202.00" }, // 4000
     ],
+    curve: [{ rpm: 2000, hp: "57.12", tq: "150.00" }, { rpm: 2250, hp: "75.83", tq: "177.00" }, { rpm: 2500, hp: "83.78", tq: "176.00" }, { rpm: 2750, hp: "93.73", tq: "179.00" }, { rpm: 3000, hp: "102.82", tq: "180.00" }, { rpm: 3250, hp: "112.00", tq: "181.00" }, { rpm: 3500, hp: "124.62", tq: "187.00" }, { rpm: 3750, hp: "139.23", tq: "195.00" }, { rpm: 4000, hp: "153.85", tq: "202.00" }, { rpm: 4250, hp: "167.51", tq: "207.00" }, { rpm: 4500, hp: "179.07", tq: "209.00" }, { rpm: 4750, hp: "187.21", tq: "207.00" }, { rpm: 5000, hp: "194.21", tq: "204.00" }, { rpm: 5250, hp: "199.00", tq: "199.00" }, { rpm: 5500, hp: "205.26", tq: "196.00" }, { rpm: 5750, hp: "208.02", tq: "190.00" }, { rpm: 6000, hp: "212.49", tq: "186.00" }, { rpm: 6250, hp: "217.77", tq: "183.00" }, { rpm: 6500, hp: "225.25", tq: "182.00" }, { rpm: 6750, hp: "223.63", tq: "174.00" }, { rpm: 7000, hp: "219.92", tq: "165.00" }],
   },
   s52s3: {
     label: "S52 S3",
@@ -164,6 +198,7 @@ const DYNO_PRESETS = {
       { hp: "278.94", tq: "266.62" }, // 5500
       { hp: "258.09", tq: "271.10" }, // 5000
     ],
+    curve: [{ rpm: 2800, hp: "94.51", tq: "177.53" }, { rpm: 3000, hp: "111.63", tq: "195.44" }, { rpm: 3500, hp: "129.82", tq: "195.15" }, { rpm: 4000, hp: "170.16", tq: "223.43" }, { rpm: 4500, hp: "225.60", tq: "263.68" }, { rpm: 5000, hp: "258.09", tq: "271.10" }, { rpm: 5500, hp: "278.94", tq: "266.62" }, { rpm: 6000, hp: "297.47", tq: "260.40" }, { rpm: 6500, hp: "313.16", tq: "253.23" }, { rpm: 7000, hp: "326.60", tq: "245.03" }, { rpm: 7500, hp: "329.20", tq: "230.62" }, { rpm: 7800, hp: "332.02", tq: "223.66" }, { rpm: 8000, hp: "327.79", tq: "215.21" }, { rpm: 8100, hp: "327.18", tq: "212.15" }],
   },
   s65: {
     label: "S65",
@@ -178,6 +213,7 @@ const DYNO_PRESETS = {
       { hp: "284.84", tq: "272.00" }, // 5500
       { hp: "263.04", tq: "276.30" }, // 5000
     ],
+    curve: [{ rpm: 3300, hp: "167.14", tq: "266.00" }, { rpm: 3500, hp: "180.60", tq: "271.00" }, { rpm: 3750, hp: "196.71", tq: "275.50" }, { rpm: 3850, hp: "202.69", tq: "276.50" }, { rpm: 4000, hp: "209.44", tq: "275.00" }, { rpm: 4250, hp: "221.73", tq: "274.00" }, { rpm: 4500, hp: "235.62", tq: "275.00" }, { rpm: 4750, hp: "250.52", tq: "277.00" }, { rpm: 4850, hp: "256.05", tq: "277.27" }, { rpm: 5000, hp: "263.04", tq: "276.30" }, { rpm: 5060, hp: "265.71", tq: "276.01" }, { rpm: 5250, hp: "274.40", tq: "274.50" }, { rpm: 5500, hp: "284.84", tq: "272.00" }, { rpm: 5750, hp: "294.51", tq: "269.00" }, { rpm: 6000, hp: "303.31", tq: "265.50" }, { rpm: 6250, hp: "311.79", tq: "262.00" }, { rpm: 6500, hp: "320.09", tq: "258.63" }, { rpm: 6750, hp: "333.13", tq: "259.20" }, { rpm: 7000, hp: "346.53", tq: "260.00" }, { rpm: 7250, hp: "353.39", tq: "256.00" }, { rpm: 7500, hp: "357.01", tq: "250.00" }, { rpm: 7750, hp: "361.53", tq: "245.00" }, { rpm: 8000, hp: "365.58", tq: "240.00" }, { rpm: 8250, hp: "367.73", tq: "234.10" }, { rpm: 8300, hp: "367.59", tq: "232.60" }, { rpm: 8400, hp: "365.62", tq: "228.60" }, { rpm: 8450, hp: "315.35", tq: "196.00" }, { rpm: 8500, hp: "242.76", tq: "150.00" }, { rpm: 8550, hp: "159.54", tq: "98.00" }],
   },
 };
 
@@ -227,9 +263,9 @@ function Stat({ label, value, unit, big, color }) {
 function Card({ n, title, sub, right, children }) {
   return (
     <section style={{ background: T.panel, border: `1px solid ${T.line}`, borderRadius: 10, padding: 20, marginBottom: 18 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, borderBottom: `1px solid ${T.line}`, paddingBottom: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", gap: 10, marginBottom: 16, borderBottom: `1px solid ${T.line}`, paddingBottom: 12 }}>
         <span style={{ ...mono, fontSize: 12, fontWeight: 700, color: "#fff", background: T.ink, borderRadius: 4, padding: "2px 7px", marginTop: 1 }}>{n}</span>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: "1 1 160px" }}>
           <h2 style={{ ...sans, fontSize: 16, fontWeight: 700, color: T.ink, margin: 0 }}>{title}</h2>
           {sub && <div style={{ ...sans, fontSize: 12, color: T.mut, marginTop: 2 }}>{sub}</div>}
         </div>
@@ -332,6 +368,164 @@ function GapTile({ kind, gap, band, pm, w, mods }) {
   );
 }
 
+// Interactive dyno chart: shows the full width of the pull (2500 RPM up to
+// just past the rev limiter, per the dyno-documentation rule that pulls must
+// start no higher than 2500 RPM), drawn on a shared numeric Y axis for WHP
+// and Torque. The bold, draggable trace covers only the 7 official PWR
+// sample points. `refCurve` (when the active preset has one) is the real
+// source pull's full curve, drawn as a faint line underneath for context —
+// it is not editable and not part of the PM calc, so it visibly diverges
+// from the bold trace once a marker is dragged. With no refCurve, the chart
+// is left blank outside the 7 points rather than inventing data.
+// `scopeRange` shades the RPM band actually in scope for the active PM calc.
+// Each 500-RPM sample point is a draggable marker on both curves; dragging
+// vertically live-edits that row's hp/tq value — the chart and the §1 table
+// stay two-way bound.
+function DynoChart({ rpmPoints, rows, setRow, scopeRange, xMin, xMax, refCurve, width, height }) {
+  const PAD = { l: 44, r: 14, t: 14, b: 26 };
+  const innerW = width - PAD.l - PAD.r;
+  const innerH = height - PAD.t - PAD.b;
+  const n = rpmPoints.length;
+
+  // chart position k runs 0..n-1 left (low RPM) → right (high RPM); origIdx
+  // is the matching index into `rows`/`rpmPoints` (top-down, 0 = highest RPM)
+  const origIdx = (k) => n - 1 - k;
+  const rpmAt = (k) => rpmPoints[origIdx(k)];
+  const hpAt = (k) => { const v = num(rows[origIdx(k)].hp); return isFinite(v) ? v : 100; };
+  const tqAt = (k) => { const v = num(rows[origIdx(k)].tq); return isFinite(v) ? v : 150; };
+
+  // the full reference curve (when the active preset has one) can peak higher
+  // than the 7 official points — e.g. S54's true peak (332 @ 7800) sits
+  // outside its 3000 RPM PWR window — so the Y scale has to account for it too
+  const refInDomain = (refCurve || []).filter((p) => p.rpm >= xMin && p.rpm <= xMax);
+  const yMaxData = Math.max(
+    50,
+    ...Array.from({ length: n }, (_, k) => hpAt(k)),
+    ...Array.from({ length: n }, (_, k) => tqAt(k)),
+    ...refInDomain.map((p) => num(p.hp)).filter(isFinite),
+    ...refInDomain.map((p) => num(p.tq)).filter(isFinite)
+  );
+  const yMax = Math.ceil((yMaxData * 1.15) / 50) * 50;
+
+  // x is true RPM-proportional across [xMin, xMax] — the whole pull width —
+  // not just evenly spaced across the 7 known points
+  const xAt = (rpm) => PAD.l + ((rpm - xMin) / (xMax - xMin)) * innerW;
+  const yAt = (v) => PAD.t + innerH - (clamp(v, 0, yMax) / yMax) * innerH;
+
+  const [drag, setDrag] = useState(null); // { origIdx, field, startY, startVal }
+
+  // relative/delta dragging (not absolute pointer-position mapping): the
+  // value moves by how far the pointer has traveled since mousedown, damped
+  // by DRAG_SENSITIVITY. Absolute mapping snapped the value straight to
+  // wherever the pointer landed, which made a trackpad's small click-jitter
+  // (common on clickpads) read as the value "exploding" on first contact.
+  const DRAG_SENSITIVITY = 0.6;
+  const startValOf = (oi, field) => {
+    const v = num(rows[oi][field]);
+    return isFinite(v) ? v : (field === "hp" ? 100 : 150);
+  };
+  const onMarkerDown = (e, oi, field) => {
+    e.preventDefault();
+    if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+    setDrag({ origIdx: oi, field, startY: e.clientY, startVal: startValOf(oi, field) });
+  };
+  const onSvgMove = (e) => {
+    if (!drag) return;
+    const perPixel = yMax / innerH;
+    const deltaY = e.clientY - drag.startY;
+    const val = clamp(Math.round((drag.startVal - deltaY * perPixel * DRAG_SENSITIVITY) * 10) / 10, 0, 999);
+    setRow(drag.origIdx, drag.field, String(val));
+  };
+  const endDrag = () => setDrag(null);
+
+  // trace only covers the 7 known sample points (bottom..top) — intentionally
+  // left blank outside that span, since that's the only data we have
+  const hpPath = Array.from({ length: n }, (_, k) => `${k === 0 ? "M" : "L"}${xAt(rpmAt(k))},${yAt(hpAt(k))}`).join(" ");
+  const tqPath = Array.from({ length: n }, (_, k) => `${k === 0 ? "M" : "L"}${xAt(rpmAt(k))},${yAt(tqAt(k))}`).join(" ");
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(yMax * f));
+  const xTicks = [];
+  for (let v = Math.ceil(xMin / 500) * 500; v <= xMax; v += 500) xTicks.push(v);
+
+  const scopeX0 = xAt(scopeRange[0]) - 10, scopeX1 = xAt(scopeRange[1]) + 10;
+
+  // reference curve: real source data beyond the 7 official points, shown as
+  // muted context underneath the bold interactive trace — not draggable, and
+  // not part of the PM calc. Only drawn where the preset actually has points.
+  const refHpPath = refInDomain.length > 1
+    ? refInDomain.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(p.rpm)},${yAt(num(p.hp))}`).join(" ")
+    : "";
+  const refTqPath = refInDomain.length > 1
+    ? refInDomain.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(p.rpm)},${yAt(num(p.tq))}`).join(" ")
+    : "";
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}
+        style={{ width: "100%", height: "auto", display: "block", touchAction: "none" }}
+        onPointerMove={onSvgMove} onPointerUp={endDrag} onPointerLeave={endDrag}>
+        <rect x={scopeX0} y={PAD.t} width={scopeX1 - scopeX0} height={innerH} fill={T.accent} opacity={0.08} />
+        {/* y gridlines */}
+        {yTicks.map((v) => (
+          <g key={v}>
+            <line x1={PAD.l} x2={width - PAD.r} y1={yAt(v)} y2={yAt(v)} stroke={T.line} strokeWidth={1} />
+            <text x={PAD.l - 6} y={yAt(v) + 3} textAnchor="end" fontSize={9.5} fill={T.mut} style={mono}>{v}</text>
+          </g>
+        ))}
+        {/* x gridlines + RPM labels, every 500 RPM across the whole pull width */}
+        {xTicks.map((v) => (
+          <g key={v}>
+            <line x1={xAt(v)} x2={xAt(v)} y1={PAD.t} y2={height - PAD.b} stroke={T.line} strokeWidth={1} strokeDasharray="2,3" />
+            <text x={xAt(v)} y={height - 8} textAnchor="middle" fontSize={9.5} fill={T.mut} style={mono}>{v}</text>
+          </g>
+        ))}
+        {/* reference curve (real data, not editable) drawn first so the bold
+            interactive trace sits on top of it — the two coincide until the
+            editable points are dragged away from the original pull */}
+        {refTqPath && <path d={refTqPath} fill="none" stroke={T.fail} strokeWidth={1.5} opacity={0.3} />}
+        {refHpPath && <path d={refHpPath} fill="none" stroke={T.accent} strokeWidth={1.5} opacity={0.3} />}
+        {/* traces — the 7 official, draggable PWR sample points */}
+        <path d={tqPath} fill="none" stroke={T.fail} strokeWidth={2} />
+        <path d={hpPath} fill="none" stroke={T.accent} strokeWidth={2} />
+        {/* draggable markers — each is a visible 7px dot plus a larger invisible
+            hit-area circle (same pointer handler) so dragging doesn't require
+            pixel-perfect precision on the small dot itself */}
+        {Array.from({ length: n }, (_, k) => {
+          const oi = origIdx(k);
+          const x = xAt(rpmAt(k));
+          return (
+            <g key={`m${k}`}>
+              <circle cx={x} cy={yAt(tqAt(k))} r={14} fill="transparent"
+                style={{ cursor: "ns-resize" }} onPointerDown={(e) => onMarkerDown(e, oi, "tq")} />
+              <circle cx={x} cy={yAt(tqAt(k))} r={7} fill={T.fail} stroke="#fff" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+              <circle cx={x} cy={yAt(hpAt(k))} r={14} fill="transparent"
+                style={{ cursor: "ns-resize" }} onPointerDown={(e) => onMarkerDown(e, oi, "hp")} />
+              <circle cx={x} cy={yAt(hpAt(k))} r={7} fill={T.accent} stroke="#fff" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ ...sans, fontSize: 11, color: T.mut, marginTop: 6, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 9, background: T.accent, marginRight: 5 }} />WHP</span>
+        <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 9, background: T.fail, marginRight: 5 }} />Torque</span>
+        <span>Drag a marker vertically to edit that point — the §1 table updates live.</span>
+      </div>
+    </div>
+  );
+}
+
+// comparison row for the V5.1-vs-V5.2 panel in §2
+function CompareRow({ version, active, onPick, pm, ratio, cls }) {
+  return (
+    <div onClick={onPick} style={{ display: "grid", gridTemplateColumns: "72px 1fr 1fr 1fr", alignItems: "center", cursor: "pointer",
+      background: active ? `${T.accent}12` : "transparent", borderLeft: `3px solid ${active ? T.accent : "transparent"}` }}>
+      <div style={{ ...mono, fontSize: 12.5, fontWeight: 700, color: active ? T.accent : T.ink, padding: "9px 10px" }}>{version}{active && " ●"}</div>
+      <div style={{ ...mono, fontSize: 13, color: T.ink, padding: "9px 10px" }}>{isFinite(pm) ? r1(pm) : "—"}</div>
+      <div style={{ ...mono, fontSize: 13, color: T.ink, padding: "9px 10px" }}>{isFinite(ratio) ? r2(ratio) : "—"}</div>
+      <div style={{ ...mono, fontSize: 13, fontWeight: 700, color: cls ? cls.hue : T.ink, padding: "9px 10px" }}>{cls ? cls.name : "—"}</div>
+    </div>
+  );
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 function PWRCalculator() {
   const [redline, setRedline] = useState("");
@@ -339,14 +533,16 @@ function PWRCalculator() {
   const [rows, setRows] = useState(Array.from({ length: 7 }, () => ({ hp: "", tq: "" })));
   const [mustang, setMustang] = useState("no");
   const [preset, setPreset] = useState("");
+  const [refCurve, setRefCurve] = useState([]); // full reference curve behind the active preset, if any — chart context only, not editable
   const [declaredPM, setDeclaredPM] = useState("");
+  const [trans, setTrans] = useState("manual"); // affects V5.2 PM sampling, so declared ahead of the PM chain
+  const [rulesVersion, setRulesVersion] = useState("v52");
 
   const [usePMFromDyno, setUsePMFromDyno] = useState(true);
   const [manualPM, setManualPM] = useState("");
   const [weight, setWeight] = useState("");
   const [tire, setTire] = useState("dotr");
   const [aero, setAero] = useState("no");
-  const [trans, setTrans] = useState("manual");
   const [targetClass, setTargetClass] = useState("PWR3");
 
   const [impW, setImpW] = useState("");
@@ -361,8 +557,34 @@ function PWRCalculator() {
   const tqVals = rows.map((r) => num(r.tq)).filter(isFinite);
   const avgHP = hpVals.length === 7 ? hpVals.reduce((a, b) => a + b, 0) / 7 : NaN;
   const avgTQ = tqVals.length === 7 ? tqVals.reduce((a, b) => a + b, 0) / 7 : NaN;
-  const calcPMraw = isFinite(avgHP) && isFinite(avgTQ) ? (avgHP + avgTQ) / 2 : NaN;
-  const calcPM = isFinite(calcPMraw) ? (mustang === "yes" ? calcPMraw * 1.1 : calcPMraw) : NaN;
+
+  // V5.1: always the flat 7-point average. V5.2: unchanged for manual-trans
+  // cars; Sequential/Automatic (-0.5 trans mod) cars instead use whichever
+  // contiguous 4-of-7 window maximizes combined WHP+Torque average.
+  const calcPM_v51raw = isFinite(avgHP) && isFinite(avgTQ) ? (avgHP + avgTQ) / 2 : NaN;
+  const best4 = useMemo(() => best4Window(rows), [rows]);
+  const isAltTrans = trans === "other";
+  const calcPM_v52raw = isAltTrans
+    ? (best4 ? (best4.avgHP + best4.avgTQ) / 2 : NaN)
+    : calcPM_v51raw;
+  const mustangFactor = mustang === "yes" ? 1.1 : 1;
+  const calcPM_v51 = isFinite(calcPM_v51raw) ? calcPM_v51raw * mustangFactor : NaN;
+  const calcPM_v52 = isFinite(calcPM_v52raw) ? calcPM_v52raw * mustangFactor : NaN;
+  const calcPM = rulesVersion === "v52" ? calcPM_v52 : calcPM_v51; // active ruleset, used throughout below
+  // best4 start index is top-down; the window spans startIdx..startIdx+3
+  const best4Range = isAltTrans && best4 ? [best4.startIdx, best4.startIdx + 3] : null;
+  // the RPM band actually in scope for the active ruleset's PM calc — the full
+  // 3000 RPM / 7-point span normally, or the narrower 1500 RPM / 4-point
+  // window when V5.2's Sequential/Automatic method picked one
+  const scopeRange = (rulesVersion === "v52" && isAltTrans && best4Range)
+    ? [rpmPoints[best4Range[1]], rpmPoints[best4Range[0]]]
+    : [rpmPoints[6], rpmPoints[0]];
+  // chart x-axis spans the whole dyno pull, not just the 7 sample points —
+  // down to 2500 RPM (rules require pulls to start no higher than that) and
+  // a bit past the rev limiter, so the known 7-point span sits inside a
+  // realistic-width chart with blank space either side (no data there)
+  const chartXMin = isFinite(rpmPoints[6]) ? Math.min(2500, rpmPoints[6] - 500) : 2500;
+  const chartXMax = isFinite(top) ? (isFinite(rl) && rl > top ? rl : top) + 400 : NaN;
   const dPM = num(declaredPM);
   const pmBelow = isFinite(dPM) && isFinite(calcPM) && dPM < calcPM;
   const setRow = (i, k, v) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
@@ -373,8 +595,9 @@ function PWRCalculator() {
     const p = DYNO_PRESETS[key];
     setTopOverride(""); setMustang(p.mustang || "no"); setRedline(p.redline);
     setRows(p.rows.map((r) => ({ ...r })));
+    setRefCurve(p.curve || []);
   };
-  const clearDyno = () => { setPreset(""); setRedline(""); setTopOverride(""); setRows(Array.from({ length: 7 }, () => ({ hp: "", tq: "" }))); setDeclaredPM(""); };
+  const clearDyno = () => { setPreset(""); setRedline(""); setTopOverride(""); setRows(Array.from({ length: 7 }, () => ({ hp: "", tq: "" }))); setDeclaredPM(""); setRefCurve([]); };
 
   // modifiers + class
   const tireMod = TIRE_OPTS.find((t) => t.key === tire).val;
@@ -390,6 +613,16 @@ function PWRCalculator() {
   const finalRatio = isFinite(baseRatio) ? baseRatio + totalMod : NaN;
   const cls = classify(finalRatio);
   const watt = `${isFinite(w) ? Math.round(w) : "----"}  ${modStr(aeroMod)}  ${modStr(tireMod)}  ${modStr(transMod)}`;
+
+  // V5.1-vs-V5.2 comparison: same declared-PM-or-fallback pattern as above,
+  // computed for both rulesets' Calculated PM so the delta is visible even
+  // before a Declared PM is locked in.
+  const pmForClass_v51 = usePMFromDyno ? (isFinite(dPM) ? dPM : calcPM_v51) : num(manualPM);
+  const pmForClass_v52 = usePMFromDyno ? (isFinite(dPM) ? dPM : calcPM_v52) : num(manualPM);
+  const ratio_v51 = isFinite(w) && isFinite(pmForClass_v51) && pmForClass_v51 > 0 ? w / pmForClass_v51 + totalMod : NaN;
+  const ratio_v52 = isFinite(w) && isFinite(pmForClass_v52) && pmForClass_v52 > 0 ? w / pmForClass_v52 + totalMod : NaN;
+  const cls_v51 = classify(ratio_v51);
+  const cls_v52 = classify(ratio_v52);
 
   // solver rows
   const havePM = isFinite(pmForClass) && pmForClass > 0;
@@ -439,6 +672,18 @@ function PWRCalculator() {
           </p>
         </header>
 
+        {/* ── Ruleset toggle ─────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap",
+          background: T.panel, border: `1px solid ${T.line}`, borderRadius: 10, padding: "12px 16px", marginBottom: 18 }}>
+          <div>
+            <div style={{ ...sans, fontSize: 11, letterSpacing: ".05em", textTransform: "uppercase", color: T.mut }}>Active ruleset</div>
+            <div style={{ ...sans, fontSize: 12.5, color: T.mut, marginTop: 2 }}>
+              Drives §1–§4 below. The compare panel in §2 always shows both versions side by side.
+            </div>
+          </div>
+          <Seg options={[{ key: "v51", label: "V5.1" }, { key: "v52", label: "V5.2" }]} value={rulesVersion} onChange={setRulesVersion} />
+        </div>
+
         {/* ── §1 PM ─────────────────────────────────────────────── */}
         <Card n="1" title="Power Metric from dyno" sub="Highest-HP run · 7 points · 500 RPM apart, top = nearest 500 below the rev limit"
           right={
@@ -454,7 +699,9 @@ function PWRCalculator() {
           }>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 150px" }}>
-              <Field label="Electronic rev limit (RPM)" hint={isFinite(autoTop) ? `Top sample point → ${autoTop}` : "e.g. 6800"}>
+              <Field label="Electronic rev limit (RPM)" hint={isFinite(autoTop)
+                ? `Top sample point → ${autoTop}${rulesVersion === "v52" ? " · V5.2: enter the point just before the curve bends into the limiter cut, not the cut itself" : ""}`
+                : "e.g. 6800"}>
                 <NumIn value={redline} onChange={setRedline} placeholder="6800" />
               </Field>
             </div>
@@ -490,6 +737,23 @@ function PWRCalculator() {
             </div>
           )}
 
+          {isFinite(top) ? (
+            <DynoChart rpmPoints={rpmPoints} rows={rows} setRow={setRow} scopeRange={scopeRange} xMin={chartXMin} xMax={chartXMax} refCurve={refCurve} width={700} height={240} />
+          ) : (
+            <div style={{ ...sans, fontSize: 12, color: T.mut, marginTop: 10, padding: "14px 16px", background: "#F7F9FA", border: `1px solid ${T.line}`, borderRadius: 8 }}>
+              Enter a rev limit above to enable the chart — drag the markers vertically to reshape the WHP/Torque curves; the table above updates live.
+            </div>
+          )}
+          {isFinite(top) && (
+            <div style={{ ...sans, fontSize: 11.5, color: T.accent, marginTop: 6 }}>
+              {rulesVersion === "v52" && isAltTrans
+                ? (best4Range
+                    ? `Shaded band = the 4 points (${scopeRange[0]}–${scopeRange[1]} RPM) V5.2 uses for this Sequential/Automatic car — the window with the highest combined WHP+Torque average.`
+                    : "Sequential/Automatic V5.2 sampling: fill all 7 points to see which 4-point window gets used.")
+                : `Shaded band = the ${scopeRange[0]}–${scopeRange[1]} RPM / 7-point span used for this car's PM. Chart shows the whole pull width (2500 RPM up)${refCurve.length ? " — faint line is the full reference pull outside the official bold/draggable points" : " — blank outside the sampled span, since that's the only data entered"}.`}
+            </div>
+          )}
+
           <div style={{ marginTop: 14 }}>
             <Field label="Mustang dyno? (adds 10% to PM)">
               <Seg options={[{ key: "no", label: "Dynojet / other" }, { key: "yes", label: "Mustang ×1.10" }]} value={mustang} onChange={setMustang} />
@@ -499,8 +763,13 @@ function PWRCalculator() {
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", background: "#F2F5F7", borderRadius: 8, padding: "14px 16px", marginTop: 6 }}>
             <Stat label="Avg WHP" value={isFinite(avgHP) ? r1(avgHP) : "—"} />
             <Stat label="Avg torque" value={isFinite(avgTQ) ? r1(avgTQ) : "—"} />
-            <Stat label="Calculated PM" value={isFinite(calcPM) ? r1(calcPM) : "—"} big color={T.accent} />
+            <Stat label={`Calculated PM (${rulesVersion.toUpperCase()})`} value={isFinite(calcPM) ? r1(calcPM) : "—"} big color={T.accent} />
           </div>
+          {rulesVersion === "v52" && isAltTrans && (
+            <div style={{ ...sans, fontSize: 11, color: T.mut, marginTop: 6 }}>
+              Using the V5.2 Sequential/Automatic method (best 4-of-7 window) — a planning estimate; the rules committee computes this manually through 2026.
+            </div>
+          )}
 
           <div style={{ marginTop: 14 }}>
             <Field label="Declared PM" hint="Declare ≥ Calculated PM; a touch higher covers dyno-to-dyno variation.">
@@ -561,6 +830,33 @@ function PWRCalculator() {
             <div style={{ ...mono, fontSize: 13, color: T.ink, marginTop: 18, paddingTop: 12, borderTop: `1px solid ${T.line}` }}>
               <span style={{ ...sans, fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", color: T.mut, marginRight: 8 }}>WATT display</span>{watt}
             </div>
+          </div>
+
+          {/* V5.1 vs V5.2 compare panel */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: `1px solid ${T.line}` }}>
+            <div style={{ ...sans, fontSize: 13, fontWeight: 700, color: T.ink, marginBottom: 2 }}>V5.1 vs V5.2 — side by side</div>
+            <div style={{ ...sans, fontSize: 11.5, color: T.mut, marginBottom: 8 }}>Click a row to make it the active ruleset above. Same weight + modifiers; only the PM method differs.</div>
+            <div style={{ border: `1px solid ${T.line}`, borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "72px 1fr 1fr 1fr", background: "#F2F5F7", borderBottom: `1px solid ${T.line}` }}>
+                {["Ruleset", "PM", "Ratio", "Class"].map((h) => (
+                  <div key={h} style={{ ...sans, fontSize: 10.5, fontWeight: 700, color: T.mut, textTransform: "uppercase", letterSpacing: ".04em", padding: "7px 10px" }}>{h}</div>
+                ))}
+              </div>
+              <div style={{ borderBottom: `1px solid ${T.line}` }}>
+                <CompareRow version="V5.1" active={rulesVersion === "v51"} onPick={() => setRulesVersion("v51")} pm={pmForClass_v51} ratio={ratio_v51} cls={cls_v51} />
+              </div>
+              <CompareRow version="V5.2" active={rulesVersion === "v52"} onPick={() => setRulesVersion("v52")} pm={pmForClass_v52} ratio={ratio_v52} cls={cls_v52} />
+            </div>
+            {cls_v51 && cls_v52 && cls_v51.name !== cls_v52.name && (
+              <div style={{ ...sans, fontSize: 12, color: T.warn, fontWeight: 600, marginTop: 8 }}>
+                The rule change moves this car {cls_v51.name} → {cls_v52.name}.
+              </div>
+            )}
+            {trans !== "other" && (
+              <div style={{ ...sans, fontSize: 11, color: T.mut, marginTop: 6 }}>
+                Manual-transmission PM method is unchanged in V5.2 — any difference above comes only from the ×1.10 Mustang factor or a Declared PM you've already entered.
+              </div>
+            )}
           </div>
         </Card>
 
@@ -643,7 +939,7 @@ function PWRCalculator() {
         </Card>
 
         <footer style={{ ...sans, fontSize: 11.5, color: T.mut, lineHeight: 1.5, marginTop: 4 }}>
-          Bands: PWR5 [6–9) · PWR4 [9–11) · PWR3 [11–14) · PWR2 [14–17) · PWR1 [17+]. Modifiers stack; a higher-performance declaration lets you run a lower-performance item without re-classing. Reproduces the published PWR V5.1 math for planning — the approved Jotform disclosure remains the compliance record.
+          Bands: PWR5 [6–9) · PWR4 [9–11) · PWR3 [11–14) · PWR2 [14–17) · PWR1 [17+]. Modifiers stack; a higher-performance declaration lets you run a lower-performance item without re-classing. Reproduces the published PWR V5.1 and V5.2 math for planning — the V5.2 Sequential/Automatic PM method (best 4-of-7 window) is this tool's estimate of a calculation the rules committee performs manually through 2026. The approved Jotform disclosure remains the compliance record.
         </footer>
       </div>
     </div>
